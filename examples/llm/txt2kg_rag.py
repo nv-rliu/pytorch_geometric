@@ -151,6 +151,13 @@ def parse_args():
         '--use_x_percent_corpus', default=100.0, type=float,
         help="Debug flag that allows user to only use a random percentage "
         "of available knowledge base corpus for RAG")
+    parser.add_argument(
+        '--store_eval_tuples', action="store_true",
+        help="Store tuple answers from test step to .pkl file for evaluation")
+    parser.add_argument(
+        '--use_stored_eval_tuples', action="store_true",
+        help="Retrieve previously saved tuples for eval instead of generating"
+        "new ones")
     args = parser.parse_args()
 
     assert args.NV_NIM_KEY, "NVIDIA API key is required for TXT2KG and eval"
@@ -203,6 +210,43 @@ prompt_template = """
     {context}
     [END_RETRIEVED_CONTEXTS]
     """
+    
+    
+#####
+def dump_eval_results(args, res):
+    json_path = Path(args.dataset / "eval_dump.json")
+    if json_path.exists():
+        while True:
+            c = input(f" ==> Do you want to delete '{str(json_path)}'? (y/n): ").strip().lower()
+            if c == "y":
+                print(f"   Removing {str(json_path)}")
+                os.remove(json_path)
+                break
+            elif c == "n":
+                return
+            else:
+                print("Please enter y/n.")
+    res['args'] = vars(args)
+    
+    with open(json_path, 'w') as f:
+        json.dump(res, json_path, indent=2)
+
+def _store_tuples(eval_tuples):
+    with open('tuples.pkl', 'wb') as f:
+        pickle.dump(eval_tuples, f)
+
+def _get_stored_tuples():
+    tuples = None
+    with open('tuples.pkl', 'rb') as f:
+        tuples = pickle.load(f)
+
+    if tuples is None:
+        raise FileNotFoundError(
+            "Error: Could not open stored tuples. Have you checked that "
+            "tuples.pkl exists?")
+
+    return tuples
+#####
 
 
 def _process_and_chunk_text(text, chunk_size, doc_parsing_mode):
@@ -691,30 +735,47 @@ def test(model, test_loader, args):
         # calculate the score based on pred and correct answer
         return llm_judge.score(question, pred, correct_answer)
 
-    scores = []
     eval_tuples = []
-    for test_batch in tqdm(test_loader, desc="Testing"):
-        new_qs = []
-        raw_qs = test_batch["question"]
-        for i, q in enumerate(test_batch["question"]):
-            # insert VectorRAG context
-            new_qs.append(
-                prompt_template.format(
-                    question=q, context="\n".join(test_batch.text_context[i])))
-        test_batch.question = new_qs
-        if args.skip_graph_rag:
-            test_batch.desc = ""
-        preds = (inference_step(model, test_batch,
-                                max_out_tokens=max_chars_in_train_answer / 2))
-        for question, pred, label in zip(raw_qs, preds, test_batch.label):
-            eval_tuples.append((question, pred, label))
-    for question, pred, label in tqdm(eval_tuples, desc="Eval"):
-        scores.append(eval(question, pred, label))
+    if not args.use_stored_eval_tuples:
+        for i, test_batch in enumerate(tqdm(test_loader, desc="Testing")):
+            # TODO Remove
+            if i > 10:
+                break
+            ###############
+            
+            new_qs = []
+            raw_qs = test_batch["question"]
+            for i, q in enumerate(test_batch["question"]):
+                # insert VectorRAG context
+                new_qs.append(
+                    prompt_template.format(
+                        question=q, context="\n".join(test_batch.text_context[i])))
+            test_batch.question = new_qs
+            if args.skip_graph_rag:
+                test_batch.desc = ""
+            preds = (inference_step(model, test_batch,
+                                    max_out_tokens=max_chars_in_train_answer / 2))
+            for question, pred, label in zip(raw_qs, preds, test_batch.label):
+                eval_tuples.append((question, pred, label))
+        if args.store_eval_tuples:
+            _store_tuples(eval_tuples)
+
+    else:
+        eval_tuples = _get_stored_tuples()
+
+    scores = []
+    summaries = {}
+    for i, (question, pred, label) in enumerate(tqdm(eval_tuples, desc="Eval")):
+        score, summary = eval(question, pred, label)
+        scores.append(score)
+        summaries[i] = summary
     avg_scores = sum(scores) / len(scores)
     print("Avg marlin accuracy=", avg_scores)
     print("*" * 5 + "NOTE" + "*" * 5)
     print("Marlin Accuracy is Estimated by LLM as a Judge!")
     print("Improvement of this estimation process is WIP...")
+    
+    return summaries
 
 
 if __name__ == '__main__':
@@ -758,4 +819,5 @@ if __name__ == '__main__':
                              drop_last=False, pin_memory=True, shuffle=False)
 
     model = train(args, train_loader, val_loader)
-    test(model, test_loader, args)
+    res = test(model, test_loader, args)
+    dump_eval_results(args, res)
