@@ -123,7 +123,8 @@ def make_dataset(args):
     # torch.save((test_data, max_chars_in_train_answer), dataset_path)
     # return total_data_list
 
-    return total_data_list[int(.8 * len(total_data_list)):]
+    print(f" ==> Using first 200 QA pairs for test data")
+    return total_data_list[:200]
 
 
 def get_model(args):
@@ -151,10 +152,21 @@ def test(model, data_list, args):
         return llm_judge.score(question, pred, correct_answer)
 
     eval_tuples = []
-    for iter, test_batch in enumerate(tqdm(data_list, desc="Testing")):
-        # if iter > 3:
-        #     print("Ending early for debugging")
-        #     break
+    iter = 0
+    checkpoint_interval = 5
+    
+    checkpoint_path = Path(args.dataset) / "test_checkpoint.pt"
+    if checkpoint_path.exists():
+        print("Restoring testing from checkpoint file...")
+        stored_data = torch.load(checkpoint_path)
+        iter = len(stored_data)
+        eval_tuples = stored_data
+        data_list = data_list[iter:]
+
+    for test_batch in tqdm(data_list, desc="Testing"):
+        if iter > 5:
+            print("Ending early for debugging")
+            break
         q_with_context = ""
         context = ""
         # TODO: should this be done in a different way?
@@ -166,15 +178,17 @@ def test(model, data_list, args):
                 question=test_batch.question, context=context)
 
         # LLM generator inference step
-        # TODO: please check if this makes sense. context was "" in txt2kg_rag. Setting it equals to the context doc returned some weird output. A list[~260]
-        qs = [
-            q_with_context,
-        ]
-
+        qs = [q_with_context]
         pred = model.inference(question=qs,
                                max_tokens=max_chars_in_train_answer / 3)
 
         eval_tuples.append((qs, pred, test_batch.label))
+        iter += 1
+        if iter % checkpoint_interval == 0:
+            print(f"Creating checkpoint at step {iter}...")
+            torch.save(eval_tuples, checkpoint_path)
+
+    breakpoint()
     scores = []
     summaries = {}
     for i, (question, pred, label) in enumerate(tqdm(eval_tuples, desc="Eval")):
