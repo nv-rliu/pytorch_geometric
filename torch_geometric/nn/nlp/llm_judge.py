@@ -154,5 +154,14 @@ class LLMJudge():
                 raise
             except:  # noqa
                 pass
+        avg_score = self._average_scores(score1, score2)
+        summary = {
+            "score1": score1,
+            "score2": score2,
+            "avg": avg_score,
+            "q": question,
+            "pred": model_pred,
+            "a": correct_answer
+        }
 
-        return self._average_scores(score1, score2)
+        return avg_score, summary

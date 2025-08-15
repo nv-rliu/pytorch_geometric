@@ -25,6 +25,26 @@ prompt_template = """
     {context}
     [END_RETRIEVED_CONTEXTS]
     """
+    
+#####
+def dump_eval_results(args, res):
+    json_path = Path(args.dataset / "eval_dump.json")
+    if json_path.exists():
+        while True:
+            c = input(f" ==> Do you want to delete '{str(json_path)}'? (y/n): ").strip().lower()
+            if c == "y":
+                print(f"   Removing {str(json_path)}")
+                os.remove(json_path)
+                break
+            elif c == "n":
+                return
+            else:
+                print("Please enter y/n.")
+    res['args'] = vars(args)
+    
+    with open(json_path, 'w') as f:
+        json.dump(res, json_path, indent=2)
+#####
 
 
 def parse_args():
@@ -44,7 +64,7 @@ def parse_args():
                         default="meta-llama/Meta-Llama-3.1-8B-Instruct",
                         help="The LLM to use for Generation")
     parser.add_argument(
-        '--llm_generator_mode', type=str, default="full",
+        '--llm_generator_mode', type=str, default="frozen",
         choices=["frozen", "lora",
                  "full"], help="Whether to freeze the Generator LLM,\
                         use LORA, or fully finetune")
@@ -130,7 +150,6 @@ def test(model, data_list, args):
         # calculate the score based on pred and correct answer
         return llm_judge.score(question, pred, correct_answer)
 
-    scores = []
     eval_tuples = []
     for iter, test_batch in enumerate(tqdm(data_list, desc="Testing")):
         # if iter > 3:
@@ -155,16 +174,20 @@ def test(model, data_list, args):
         pred = model.inference(question=qs,
                                max_tokens=max_chars_in_train_answer / 3)
 
-        eval_tuples.append((q, pred, test_batch.label))
-    for question, pred, label in tqdm(eval_tuples, desc="Eval"):
-        breakpoint()
-        scores.append(eval(question, pred, label))
-
+        eval_tuples.append((qs, pred, test_batch.label))
+    scores = []
+    summaries = {}
+    for i, (question, pred, label) in enumerate(tqdm(eval_tuples, desc="Eval")):
+        score, summary = eval(question, pred, label)
+        scores.append(score)
+        summaries[i] = summary
     avg_scores = sum(scores) / len(scores)
     print("Avg marlin accuracy=", avg_scores)
     print("*" * 5 + "NOTE" + "*" * 5)
     print("Marlin Accuracy is Estimated by LLM as a Judge!")
     print("Improvement of this estimation process is WIP...")
+    
+    return summaries
 
 
 if __name__ == '__main__':
@@ -186,4 +209,5 @@ if __name__ == '__main__':
     #  drop_last=False, pin_memory=True, shuffle=False)
 
     model = get_model(args)
-    test(model, data_lists, args)
+    res = test(model, data_lists, args)
+    dump_eval_results(args, res)
