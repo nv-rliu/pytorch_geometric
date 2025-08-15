@@ -169,8 +169,6 @@ def test(model, data_list, args):
             break
         q_with_context = ""
         context = ""
-        # TODO: should this be done in a different way?
-        # insert VectorRAG context
         doc_path = Path(args.dataset) / "corpus" / test_batch.context_doc
         with open(doc_path) as f:
             context = f.read()
@@ -185,10 +183,8 @@ def test(model, data_list, args):
         eval_tuples.append((qs, pred, test_batch.label))
         iter += 1
         if iter % checkpoint_interval == 0:
-            print(f"Creating checkpoint at step {iter}...")
             torch.save(eval_tuples, checkpoint_path)
 
-    breakpoint()
     scores = []
     summaries = {}
     for i, (question, pred, label) in enumerate(tqdm(eval_tuples, desc="Eval")):
