@@ -141,8 +141,8 @@ class LLMJudge():
                     break
             except ImportError:
                 raise
-            except:  # noqa
-                pass
+            # except:  # noqa
+                # pass
         for _retry in range(20):
             try:
                 score2 = self._process_score(
@@ -152,8 +152,8 @@ class LLMJudge():
                     break
             except ImportError:
                 raise
-            except:  # noqa
-                pass
+            # except:  # noqa
+                # pass
         avg_score = self._average_scores(score1, score2)
         summary = {
             "score1": score1,

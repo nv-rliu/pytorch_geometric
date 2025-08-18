@@ -28,22 +28,9 @@ prompt_template = """
     
 #####
 def dump_eval_results(args, res):
-    json_path = Path(args.dataset / "eval_dump.json")
-    if json_path.exists():
-        while True:
-            c = input(f" ==> Do you want to delete '{str(json_path)}'? (y/n): ").strip().lower()
-            if c == "y":
-                print(f"   Removing {str(json_path)}")
-                os.remove(json_path)
-                break
-            elif c == "n":
-                return
-            else:
-                print("Please enter y/n.")
-    res['args'] = vars(args)
-    
+    json_path = Path(args.dataset) / "eval_dump.json"
     with open(json_path, 'w') as f:
-        json.dump(res, json_path, indent=2)
+        json.dump(res, f, indent=2)
 #####
 
 
@@ -68,8 +55,6 @@ def parse_args():
         choices=["frozen", "lora",
                  "full"], help="Whether to freeze the Generator LLM,\
                         use LORA, or fully finetune")
-    parser.add_argument('--dont_save_model', action="store_true",
-                        help="Whether to skip model saving.")
     parser.add_argument(
         '--num_gpus', type=int, default=None,
         help="Number of GPUs to use. If not specified,"
@@ -153,7 +138,7 @@ def test(model, data_list, args):
 
     eval_tuples = []
     iter = 0
-    checkpoint_interval = 5
+    checkpoint_interval = 10
     
     checkpoint_path = Path(args.dataset) / "test_checkpoint.pt"
     if checkpoint_path.exists():
@@ -184,20 +169,34 @@ def test(model, data_list, args):
         iter += 1
         if iter % checkpoint_interval == 0:
             torch.save(eval_tuples, checkpoint_path)
-
+    torch.save(eval_tuples, checkpoint_path)
+    
     scores = []
     summaries = {}
-    for i, (question, pred, label) in enumerate(tqdm(eval_tuples, desc="Eval")):
-        score, summary = eval(question, pred, label)
+    summaries['args'] = vars(args)
+    
+    iter = 0
+    json_path = Path(args.dataset) / "eval_dump.json"
+    if json_path.exists():
+        with open(json_path) as f:
+            summaries = json.load(f)
+            iter = len(summaries) - 1
+    
+    for question, pred, label in tqdm(eval_tuples[iter:], desc="Eval"):
+        score, summary = eval(question[0], pred[0], label)
         scores.append(score)
-        summaries[i] = summary
+        summaries[iter] = summary
+        
+        iter += 1
+        if iter % checkpoint_interval == 0:
+            dump_eval_results(args, summaries)
+
     avg_scores = sum(scores) / len(scores)
     print("Avg marlin accuracy=", avg_scores)
     print("*" * 5 + "NOTE" + "*" * 5)
     print("Marlin Accuracy is Estimated by LLM as a Judge!")
     print("Improvement of this estimation process is WIP...")
-    
-    return summaries
+    dump_eval_results(args, summaries)
 
 
 if __name__ == '__main__':
@@ -219,5 +218,4 @@ if __name__ == '__main__':
     #  drop_last=False, pin_memory=True, shuffle=False)
 
     model = get_model(args)
-    res = test(model, data_lists, args)
-    dump_eval_results(args, res)
+    test(model, data_lists, args)
