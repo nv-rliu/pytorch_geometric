@@ -32,7 +32,6 @@ from tqdm import tqdm
 
 from torch_geometric import seed_everything
 from torch_geometric.loader import DataLoader, RAGQueryLoader 
-from torch.utils.data import Subset
 from torch_geometric.nn import (
     GAT,
     LLM,
@@ -54,7 +53,7 @@ from torch_geometric.utils.rag.graph_store import NeighborSamplingRAGGraphStore
 from torch_geometric.utils.rag.vectorrag import DocumentRetriever
 
 # Define constants for better readability
-NV_NIM_MODEL_DEFAULT = "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+NV_NIM_MODEL_DEFAULT = "nvdev/nvidia/llama-3.1-nemotron-ultra-253b-v1"
 LLM_GENERATOR_NAME_DEFAULT = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 ENCODER_MODEL_NAME_DEFAULT = "Alibaba-NLP/gte-modernbert-base"
 KG_CHUNK_SIZE_DEFAULT = 512
@@ -702,20 +701,22 @@ def test(model, test_loader, args):
 
     eval_tuples = []
     iter = 0
-    checkpoint_interval = 10
+    checkpoint_interval = 20
     checkpoint_path = Path(args.dataset) / "test_checkpoint.pt"
-    breakpoint()
+
     if checkpoint_path.exists():
         print("Restoring testing from checkpoint file...")
         stored_data = torch.load(checkpoint_path)
-        iter = len(stored_data)
+        iter = len(list(stored_data))
         eval_tuples = stored_data
-        test_loader = Subset(test_loader, range(iter, len(test_loader.dataset)))
+        test_loader = list(test_loader)[iter:]
+        print(f"Continuing from {iter}th item. {len(test_loader)} remaining")
+    breakpoint()
     for test_batch in tqdm(test_loader, desc="Testing w/ Checkpoints"):
         # TODO Remove
-        if iter > 2:
-            print("Ending early for debugging")
-            break
+        # if iter > 2:
+        #     print("Ending early for debugging")
+        #     break
         ###############
         
         new_qs = []
@@ -744,6 +745,7 @@ def test(model, test_loader, args):
     iter = 0
     json_path = Path(args.dataset) / "eval_dump.json"
     if json_path.exists():
+        "Retrieving previous eval dump..."
         with open(json_path) as f:
             summaries = json.load(f)
             iter = len(summaries) - 1
@@ -751,18 +753,18 @@ def test(model, test_loader, args):
     for question, pred, label in tqdm(eval_tuples, desc="Eval"):
         score, summary = eval(question, pred, label)
         scores.append(score)
-        summaries[i] = summary
+        summaries[iter] = summary
         
         iter += 1
         if iter % checkpoint_interval == 0:
             dump_eval_results(args, summaries)
+    dump_eval_results(args, summaries)
         
     avg_scores = sum(scores) / len(scores)
     print("Avg marlin accuracy=", avg_scores)
     print("*" * 5 + "NOTE" + "*" * 5)
     print("Marlin Accuracy is Estimated by LLM as a Judge!")
     print("Improvement of this estimation process is WIP...")
-    dump_eval_results(args, summaries)
 
 
 if __name__ == '__main__':
@@ -778,7 +780,7 @@ if __name__ == '__main__':
     # Need to sanitize sensitive keys
     saved_NIM_KEY = args.NV_NIM_KEY
     args.NV_NIM_KEY = "********"
-    print(f"Starting {args.dataset} training with args: ", args)
+    print(f"Starting {args.dataset} training with args: ", vars(args))
     args.NV_NIM_KEY = saved_NIM_KEY
 
     dataset_name = os.path.basename(args.dataset)
