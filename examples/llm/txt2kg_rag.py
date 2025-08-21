@@ -711,7 +711,7 @@ def test(model, test_loader, args):
         eval_tuples = stored_data
         test_loader = list(test_loader)[iter:]
         print(f"Continuing from {iter}th item. {len(test_loader)} remaining")
-    breakpoint()
+
     for test_batch in tqdm(test_loader, desc="Testing w/ Checkpoints"):
         # TODO Remove
         # if iter > 2:
@@ -741,6 +741,7 @@ def test(model, test_loader, args):
     scores = []
     summaries = {}
     summaries['args'] = vars(args)
+    summaries['timestamp'] = datetime.now().strftime('%Y-%m-%d_%H:%M')
     
     iter = 0
     json_path = Path(args.dataset) / "eval_dump.json"
@@ -768,6 +769,7 @@ def test(model, test_loader, args):
 
 
 if __name__ == '__main__':
+    from pprint import pprint
     # for reproducibility
     seed_everything(50)
 
@@ -780,7 +782,8 @@ if __name__ == '__main__':
     # Need to sanitize sensitive keys
     saved_NIM_KEY = args.NV_NIM_KEY
     args.NV_NIM_KEY = "********"
-    print(f"Starting {args.dataset} training with args: ", vars(args))
+    print(f"Starting {args.dataset} training with args: ")
+    pprint(vars(args))
     args.NV_NIM_KEY = saved_NIM_KEY
 
     dataset_name = os.path.basename(args.dataset)
